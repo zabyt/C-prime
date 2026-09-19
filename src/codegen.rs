@@ -2601,23 +2601,55 @@ fn emit_assign(
         field: &str,
         span: &SourceSpan,
     ) -> Result<(PointerValue<'ctx>, CType), CodegenError> {
-        let (bv, bt) = self.emit_expr(base)?;
-        let (struct_name, struct_args, base_ptr) = match &bt {
+        let base_ty = self.static_ctype(base);
+        let (struct_name, struct_args, base_ptr) = match base_ty {
             CType::Pointer { pointee, .. } => {
-                let st = match &**pointee {
-                    CType::Struct { name, args } => (name.clone(), args.clone()),
-                    other => return Err(unsupported(span, format!("field access on a non-struct type `{other}`"))),
+                let st = match *pointee {
+                    CType::Struct { name, args } => (name, args),
+                    other => {
+                        return Err(unsupported(span, format!("field access on a non-struct type `{other}`")));
+                    }
                 };
+                let (bv, _) = self.emit_expr(base)?;
                 (st.0, st.1, bv.into_pointer_value())
             }
             CType::Struct { name, args } => {
-                
-                let st = self.struct_type(name, args)?;
-                let tmp = self.builder.build_alloca(st, "tmp.struct").map_err(|err| self.int_err(err))?;
-                self.builder.build_store(tmp, bv).map_err(|err| self.int_err(err))?;
-                (name.clone(), args.clone(), tmp)
+                if let Ok((bp, _)) = self.emit_lvalue(base, span) {
+                    (name, args, bp)
+                } else {
+                    let (bv, _) = self.emit_expr(base)?;
+                    let st = self.struct_type(&name, &args)?;
+                    let tmp = self.builder.build_alloca(st, "tmp.struct").map_err(|err| self.int_err(err))?;
+                    self.builder.build_store(tmp, bv).map_err(|err| self.int_err(err))?;
+                    (name, args, tmp)
+                }
             }
-            other => return Err(unsupported(span, format!("field access on a non-struct type `{other}`"))),
+            CType::Void => {
+                let (bv, brow) = self.emit_expr(base)?;
+                match &brow {
+                    CType::Pointer { pointee, .. } => {
+                        let st = match &**pointee {
+                            CType::Struct { name, args } => (name.clone(), args.clone()),
+                            other => {
+                                return Err(unsupported(span, format!("field access on a non-struct type `{other}`")));
+                            }
+                        };
+                        (st.0, st.1, bv.into_pointer_value())
+                    }
+                    CType::Struct { name, args } => {
+                        let st = self.struct_type(name, args)?;
+                        let tmp = self.builder.build_alloca(st, "tmp.struct").map_err(|err| self.int_err(err))?;
+                        self.builder.build_store(tmp, bv).map_err(|err| self.int_err(err))?;
+                        (name.clone(), args.clone(), tmp)
+                    }
+                    other => {
+                        return Err(unsupported(span, format!("field access on a non-struct type `{other}`")));
+                    }
+                }
+            }
+            other => {
+                return Err(unsupported(span, format!("field access on a non-struct type `{other}`")));
+            }
         };
         let idx = self
             .field_index(&struct_name, &struct_args, field)
@@ -3235,6 +3267,52 @@ fn main() -> i32 {
     fn emits_pointer_indexing() {
         let ir = check("fn main(p: *const i32) -> i32 { return p[2]; }").unwrap();
         assert!(ir.contains("getelementptr"), "{ir}");
+    }
+
+    #[test]
+    fn struct_field_assignment_reaches_local_storage() {
+        let ir = check(
+            r#"
+struct T { a: i64, b: i64 }
+fn main() -> i32 {
+    let mut t: T = T { a: 1, b: 2 };
+    t.a = 7;
+    if t.a == 7 { return 0; }
+    return 1;
+}
+"#,
+        )
+        .unwrap();
+        assert!(
+            !ir.contains("tmp.struct"),
+            "struct field write must land in the variable's own storage, not a dead temporary\n{ir}"
+        );
+        assert!(ir.contains("store i64 7"), "{ir}");
+    }
+
+    #[test]
+    fn indexed_pointer_struct_field_assignment_reaches_row() {
+        let ir = check(
+            r#"
+struct T { a: i64, b: i64 }
+fn main() -> i32 {
+    let mut buf: *mut T = malloc(8 * sizeOf[T]) as *mut T;
+    let r: T = T { a: 3, b: 4 };
+    buf[0] = r;
+    buf[0].b = 9;
+    let g: T = buf[0];
+    if g.b == 9 { return 0; }
+    return 1;
+}
+extern fn malloc(size: usize) -> *mut void;
+"#,
+        )
+        .unwrap();
+        assert!(
+            !ir.contains("tmp.struct"),
+            "row struct field write must reach the pointed-to row, not a dead temporary\n{ir}"
+        );
+        assert!(ir.contains("store i64 9"), "{ir}");
     }
 
     #[test]

@@ -40,19 +40,15 @@ impl JsonParser {
     }
 
     fn link_child(&mut self, parent: i64, child: i64) {
-        let old: JsonNode = self.nodes_data[parent as usize];
-        let mut head: i64 = old.first_child;
+        let mut head: i64 = self.nodes_data[parent as usize].first_child;
         if head < 0 {
-            let node: JsonNode = JsonNode { kind: old.kind, bval: old.bval, nval: old.nval, sval: old.sval, key: old.key, first_child: child, next_sibling: old.next_sibling };
-            self.nodes_data[parent as usize] = node;
+            self.nodes_data[parent as usize].first_child = child;
             return;
         }
         while true {
-            let cur: JsonNode = self.nodes_data[head as usize];
-            let next: i64 = cur.next_sibling;
+            let next: i64 = self.nodes_data[head as usize].next_sibling;
             if next < 0 {
-                let node: JsonNode = JsonNode { kind: cur.kind, bval: cur.bval, nval: cur.nval, sval: cur.sval, key: cur.key, first_child: cur.first_child, next_sibling: child };
-                self.nodes_data[head as usize] = node;
+                self.nodes_data[head as usize].next_sibling = child;
                 return;
             }
             head = next;
@@ -60,9 +56,7 @@ impl JsonParser {
     }
 
     fn set_child_key(&mut self, id: i64, key: *mut char) {
-        let old: JsonNode = self.nodes_data[id as usize];
-        let node: JsonNode = JsonNode { kind: old.kind, bval: old.bval, nval: old.nval, sval: old.sval, key: key, first_child: old.first_child, next_sibling: old.next_sibling };
-        self.nodes_data[id as usize] = node;
+        self.nodes_data[id as usize].key = key;
     }
 
     fn at_end(&mut self) -> bool {
