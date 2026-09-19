@@ -2058,39 +2058,37 @@ fn emit_assign(
             struct_args.to_vec()
         } else if !struct_args.is_empty() {
             struct_args.to_vec()
-        } else if let Some((hint_name, hint_args)) = self.struct_literal_hint.take()
-            && hint_name == struct_name
-            && hint_args.len() == struct_info.generics.len()
-        {
-            
-            hint_args
         } else {
+            
+            
             
             
             
             let mut bindings = HashMap::new();
             let params_start = if sig_template.has_self { 1 } else { 0 };
-            let ok = sig_template.params[params_start..]
+            let bind_ok = sig_template.params[params_start..]
                 .iter()
                 .zip(arg_tys.iter())
                 .all(|(p, a)| match_type(p, a, &mut bindings));
-            if !ok {
+            let fully_bound = struct_info.generics.iter().all(|g| bindings.contains_key(g));
+            if bind_ok && fully_bound {
+                struct_info
+                    .generics
+                    .iter()
+                    .map(|g| bindings[g].clone())
+                    .collect()
+            } else if let Some((hint_name, hint_args)) = self.struct_literal_hint.take()
+                && hint_name == struct_name
+                && hint_args.len() == struct_info.generics.len()
+            {
+                
+                
+                hint_args
+            } else if bind_ok {
+                return Err(unsupported(span, format!("cannot infer all type arguments for `{struct_name}::{method}`")));
+            } else {
                 return Err(unsupported(span, format!("cannot infer type arguments for `{struct_name}::{method}`")));
             }
-            struct_info
-                .generics
-                .iter()
-                .map(|g| {
-                    bindings.get(g).cloned().ok_or_else(|| {
-                        CodegenError::Unsupported {
-                            span: Some(span.clone()),
-                            message: format!(
-                                "cannot infer type argument `{g}` for `{struct_name}::{method}`"
-                            ),
-                        }
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?
         };
 
         let fn_args = self.infer_fn_args(sig_template, &arg_tys, span)?;
@@ -2888,10 +2886,10 @@ fn emit_assign(
             ast::Expr::Call { .. } => CType::Void,
             ast::Expr::MethodCall { receiver, method, .. } => {
                 let rt = self.static_ctype(receiver);
-                let struct_name = match &rt {
-                    CType::Struct { name, .. } => name.clone(),
+                let (struct_name, struct_args) = match &rt {
+                    CType::Struct { name, args } => (name.clone(), args.clone()),
                     CType::Pointer { pointee, .. } => match &**pointee {
-                        CType::Struct { name, .. } => name.clone(),
+                        CType::Struct { name, args } => (name.clone(), args.clone()),
                         _ => return CType::Void,
                     },
                     _ => return CType::Void,
@@ -2900,6 +2898,20 @@ fn emit_assign(
                     .get(&struct_name)
                     .and_then(|m| m.get(method))
                     .and_then(|s| s.return_ty.clone())
+                    .map(|ret| {
+                        self.structs
+                            .get(&struct_name)
+                            .map(|info| {
+                                let bindings: HashMap<String, CType> = info
+                                    .generics
+                                    .iter()
+                                    .zip(struct_args.iter())
+                                    .map(|(g, ty)| (g.clone(), ty.clone()))
+                                    .collect();
+                                ret.substitute(&bindings)
+                            })
+                            .unwrap_or(ret)
+                    })
                     .unwrap_or(CType::Void)
             }
             ast::Expr::FieldAccess { base, field, .. } => {
@@ -3313,6 +3325,29 @@ extern fn malloc(size: usize) -> *mut void;
             "row struct field write must reach the pointed-to row, not a dead temporary\n{ir}"
         );
         assert!(ir.contains("store i64 9"), "{ir}");
+    }
+
+    #[test]
+    fn generic_method_result_substitutes_concrete_args() {
+        let ir = check(
+            r#"
+struct W[T] { v: T }
+impl W[T] {
+    fn wrap(v: T) -> W[T] { return W[T] { v: v }; }
+    fn val(&self) -> T { return self.v; }
+    fn set(&mut self, v: T) { self.v = v; }
+}
+fn main() -> i32 {
+    let mut outer: W[W[i32]] = W::wrap(W::wrap(3 as i32));
+    outer.set(W::wrap(5 as i32));
+    let inner: W[i32] = outer.val();
+    if inner.val() == 5 { return 0; }
+    return 1;
+}
+"#,
+        )
+        .unwrap();
+        assert!(ir.contains("define i32 @main"), "{ir}");
     }
 
     #[test]
