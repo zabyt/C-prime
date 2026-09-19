@@ -1,0 +1,31 @@
+[package]
+name = "cprime-compiler"
+version = "0.1.0"
+edition = "2024"
+description = "Compiler for the C-Prime (.cp) systems programming language"
+license = "Apache-2.0"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+
+# LLVM bindings. Gated behind the `codegen` feature so that front-end
+# phases (lexer/parser/typechecker) build and test without requiring a
+# system LLVM installation.
+inkwell = { version = "0.10", optional = true, default-features = false, features = ["llvm22-1", "target-x86", "target-arm", "target-aarch64", "target-riscv", "target-webassembly", "target-bpf", "target-nvptx"] }
+
+[features]
+default = []
+# Enables LLVM IR emission (Phase 4+). Requires LLVM 22.1+ to be installed
+# and discoverable by llvm-sys (set LLVM_SYS_221_PREFIX to the folder that
+# contains bin/llvm-config.exe if it is not on PATH).
+#
+# The project-local `.cargo/config.toml` points LLVM_SYS_221_PREFIX at the
+# full LLVM 22.1.8 toolchain bundle in D:\LLVM22 and sets the linker.
+codegen = ["dep:inkwell"]
+
+[dev-dependencies]
+
+[[test]]
+name = "integration_tests"
+path = "tests/integration_tests.rs"

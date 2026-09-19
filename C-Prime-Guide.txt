@@ -1,0 +1,256 @@
+C-Prime Language Guide
+=====================
+
+What is C-Prime?
+-----------------
+C-Prime is a small systems-style programming language designed as a compiler project.
+It supports a Rust-like syntax with a few C-like ideas: structs, impl blocks, functions,
+loops, pattern matching, generics, and pointer-based operations.
+
+This project is a compiler front end: it lexes, parses, type-checks, and can generate
+LLVM IR when the optional codegen feature is enabled.
+
+Files use the .cp extension.
+
+Basic syntax
+------------
+
+Importing modules
+-----------------
+import std.io;
+
+Function definition
+-------------------
+fn main() -> i32 {
+    return 0;
+}
+
+Variables
+---------
+let x: i32 = 10;
+let mut total: f64 = 0.0;
+
+Assignments:
+    x = x + 1;
+
+Conditionals
+------------
+if value > 0 {
+    println(value);
+} else {
+    println(0);
+}
+
+Loops
+-----
+while i < 10 {
+    i = i + 1;
+}
+
+for ch in "C-Prime" {
+    println(ch);
+}
+
+Structs
+-------
+struct Point {
+    x: f64,
+    y: f64
+}
+
+impl Point {
+    fn new(x: f64, y: f64) -> Point {
+        return Point { x: x, y: y };
+    }
+
+    fn add(self, other: Point) -> Point {
+        return Point { x: self.x + other.x, y: self.y + other.y };
+    }
+}
+
+Methods are called like this:
+    let p: Point = Point::new(1.0, 2.0);
+    let q: Point = p.add(Point::new(3.0, 4.0));
+
+Generics
+--------
+fn swap[T](a: *mut T, b: *mut T) {
+    let tmp: T = *a;
+    *a = *b;
+    *b = tmp;
+    return;
+}
+
+Pointers
+--------
+*mut T and *const T are supported for generic pointer logic.
+
+Example:
+    let mut v: i32 = 9;
+    let ptr: *mut i32 = &v;
+    *ptr = 10;
+
+Pattern matching
+----------------
+match value {
+    0 => println("zero"),
+    1 => println("one"),
+    _ => println("other"),
+}
+
+Calling C functions (extern)
+----------------------------
+Any C function can be declared with `extern fn` and then called directly.
+The parameter and return types map 1:1 to C types:
+
+    extern fn strlen(s: *const char) -> usize;
+    extern fn malloc(size: usize) -> *mut void;
+    extern fn free(p: *mut void);
+    extern fn sin(x: f64) -> f64;
+
+    fn main() {
+        let p: *mut i32 = malloc(64) as *mut i32;
+        ...
+        free(p);
+    }
+
+Notes:
+- `void` is a valid type for extern parameters and returns (`*mut void` is a void pointer).
+- The name is emitted verbatim, so it must match the C symbol (case-sensitive on Windows).
+- The linker must be told where the symbol lives, see "Building and linking" below.
+- A convenient set of CRT bindings lives in examples/std/ctypes.cp
+  (malloc, free, strlen, memcpy, memset, modf, floor, sqrt, pow, ...).
+
+The null literal
+----------------
+`null` is a literal usable wherever a pointer type is expected:
+
+    let p: *mut i32 = null;
+    if p == null {
+        ...
+    }
+    p = null;
+
+Pointer comparison against null (and between pointers) is supported.
+
+Casts
+-----
+`as` casts are supported between numeric types, from `char` to numbers,
+and from string literals / `*const char` to other pointer types:
+
+    let n: i32 = (255.7 as i32);       // float -> int
+    let c: char = (48 + d) as char;    // int -> char (use the +48 for '0'..'9')
+    let ip: u64 = (3.14 as u64);       // float -> int
+    let s: *const char = "hello";      // literal coerces directly
+
+The include directive
+---------------------
+Files can be spliced into the source before compilation:
+
+    include "std/raylib.cp";
+    include "std/ctypes.cp";
+
+- The path is relative to the including file.
+- Imports are recursive and cycles are detected and rejected.
+- The `include` line is removed before lexing, so it can appear anywhere
+  at statement level.
+
+Language rules to know
+----------------------
+- `if` is a statement, not an expression: there is no `let x = if ...`.
+- There is no implicit return: a function returning a value must end with
+  an explicit `return expr;`. The final expression statement is NOT a return.
+- Every statement needs a trailing `;`, including the last one in a block.
+- Operator precedence follows C: `&` and `|` bind looser than `==` / `!=`.
+  Write `(mask & bit) != 0`, not `mask & bit != 0`.
+- `const NAME: ty = value;` requires the type annotation.
+- There are no arrays or array literals. Use `malloc` and pointer indexing:
+      let buf: *mut i32 = malloc((n * 4) as usize) as *mut i32;
+      buf[i] = 42;          // write
+      let v: i32 = buf[i];  // read
+- Pointer arithmetic (ptr + 1) is not supported; use buf[i] instead.
+- `Str` is not usable as a named type; return `*const char` instead.
+
+Print output
+------------
+println("hello");
+println(42);
+println(3.14);
+
+Main program example
+--------------------
+import std.io;
+
+struct Vector2 {
+    x: f64,
+    y: f64
+}
+
+impl Vector2 {
+    fn new(x: f64, y: f64) -> Vector2 {
+        return Vector2 { x: x, y: y };
+    }
+}
+
+fn main() -> i32 {
+    let v: Vector2 = Vector2::new(1.5, 2.5);
+    println(v.x);
+    return 0;
+}
+
+How to use the compiler
+-----------------------
+From the project folder, you can run the compiler like this:
+
+    cargo run --quiet -- --lex your_file.cp
+    cargo run --quiet -- --parse your_file.cp
+    cargo run --quiet -- --check your_file.cp
+
+With the codegen feature enabled, you can also emit LLVM IR and build executables:
+
+    cargo run --quiet --features codegen -- --emit-llvm your_file.ll your_file.cp
+    cargo run --quiet --features codegen -- --link -o your_program.exe your_file.cp
+
+Linking against external C libraries
+------------------------------------
+The `--link` step runs a C driver (clang) on the generated object file.
+Extra libraries are passed with `--link-lib` (repeatable) and extra search
+directories with `--lib-path` (repeatable):
+
+    cargo run --quiet --features codegen -- --link \
+        --link-lib raylibdll --lib-path ..\..\third_party\raylib \
+        -o tetris.exe tetris.cp
+
+GUI programming with raylib
+---------------------------
+raylib 5.5 bindings live in examples/std/raylib.cp and include:
+- Color / Vector2 / Rectangle structs and the full color palette (BLACK,
+  DARKGRAY, SKYBLUE, ...) as typed constants
+- window: InitWindow, WindowShouldClose, CloseWindow, SetTargetFPS
+- drawing: BeginDrawing, EndDrawing, ClearBackground, DrawRectangle,
+  DrawRectangleLines, DrawCircle, DrawText, DrawFPS
+- input: IsKeyPressed/IsKeyDown, GetKeyPressed, GetCharPressed,
+  IsMouseButtonPressed, GetMouseX/GetMouseY, GetMousePosition
+- timing/random: GetFrameTime, GetTime, GetRandomValue, SetRandomSeed
+- KEY_* and MOUSE_* button constants
+
+Windows build notes:
+- Use the DLL import library raylibdll.lib (the 5 MB raylib.lib in the MSVC
+  zip is the static library and pulls in extra system libs).
+- Copy raylib.dll next to the produced .exe before running it.
+
+Working examples live in examples/:
+- examples/raylib_hello.cp        (minimal window)
+- examples/calculator_gui.cp      (working calculator with mouse + keyboard)
+- examples/tetris.cp              (full Tetris: rotation, gravity, scoring)
+- examples/ffi_test.cp            (extern fn and pointers)
+
+Notes
+-----
+- The compiler front end is implemented and works for the supported language features.
+- LLVM code generation is optional and only enabled with the codegen feature.
+- This guide reflects the features currently implemented by the compiler, not every
+  theoretical language feature you might want to add later.
+
+If you want a very small sample file, see examples/feature_demo.cp and
+examples/advanced_demo.cp in this repository.

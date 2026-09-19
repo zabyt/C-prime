@@ -1,0 +1,15 @@
+/target
+
+# Build artifacts
+*.exe
+*.dll
+*.o
+*.obj
+*.lib
+
+# Generated / debugging output
+compile-output.txt
+demo_out.txt
+
+# Local toolchain configuration (LLVM paths are machine-specific)
+/.cargo/
