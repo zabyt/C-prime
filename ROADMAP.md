@@ -8,9 +8,10 @@ the items below target the next version. Order reflects expected impact.
 The standard library is the fastest way to make C-Prime useful for real
 programs. Everything here is written in C-Prime itself (`examples/std/`).
 
-- `String`: `split`, `trim`, `index_of`, `contains`, `starts_with`,
-  `ends_with`, `to_upper`, `to_lower`, `compare`
-- `Vec[T]`: `pop`, `remove`, `insert`, `contains`
+- `String`: `split`, `trimmed`, `index_of`, `contains`, `starts_with`,
+  `ends_with`, `to_upper`, `to_lower`, `compare`, `substring` — **done**
+- `Vec[T]`: `pop`, `remove`, `insert`, `last` — `pop`/`remove`/`insert` **done**
+- JSON parser (`examples/std/json.cp` + `examples/json_test.cp`) — **done**
 - `HashSet[T]` over the existing hash-map machinery
 - Buffered byte reader/writer for binary files
 - Command-line arguments and environment (`getenv`-style)

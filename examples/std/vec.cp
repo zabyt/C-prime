@@ -65,6 +65,44 @@ impl Vec[T] {
         return self.data[0];
     }
 
+    fn insert(&mut self, i: usize, value: T) {
+        if self.length == self.capacity {
+            self.grow(self.capacity * 2 + 4);
+        }
+        let mut at: usize = i;
+        if at > self.length {
+            at = self.length;
+        }
+        let mut j: usize = self.length;
+        while j > at {
+            self.data[j] = self.data[j - 1];
+            j = j - 1;
+        }
+        self.data[at] = value;
+        self.length = self.length + 1;
+    }
+
+    fn remove(&mut self, i: usize) -> T {
+        let out = self.data[i];
+        let mut j: usize = i;
+        while j + 1 < self.length {
+            self.data[j] = self.data[j + 1];
+            j = j + 1;
+        }
+        if self.length > 0 {
+            self.length = self.length - 1;
+        }
+        return out;
+    }
+
+    fn last(&self) -> T {
+        let mut i: usize = self.length;
+        if i > 0 {
+            i = i - 1;
+        }
+        return self.data[i];
+    }
+
     fn reserve(&mut self, extra: usize) {
         let required = self.length + extra;
         if required > self.capacity {

@@ -1,3 +1,4 @@
+include "std/vec.cp";
 include "std/string.cp";
 
 fn main() -> i32 {
@@ -49,6 +50,56 @@ fn main() -> i32 {
     println("parsed 123:");
     println(parsed == 123);
     pi2.free_buf();
+
+    s.clear();
+    s.append("C-Prime Compiler");
+    println("starts_with C-Prime:");
+    println(s.starts_with("C-Prime"));
+    println("ends_with Compiler:");
+    println(s.ends_with("Compiler"));
+    println("index_of P (expect 2):");
+    println(s.index_of('P' as char) == 2);
+    println("index_of x (expect -1):");
+    println(s.index_of('x' as char) == -1);
+    println("contains r:");
+    println(s.contains('r' as char));
+    let lc: String = s.to_lower();
+    println("lower:");
+    println(lc.cstr());
+    let uc: String = s.to_upper();
+    println("upper:");
+    println(uc.cstr());
+    println("substring 8,8:");
+    let sub2: String = s.substring(8, 8);
+    println(sub2.cstr());
+    println("compare same:");
+    let cmp2: i32 = s.compare("C-Prime Compiler");
+    println(cmp2 == 0);
+    let ws: String = String::from_cstr("   spaced out   ");
+    let tr: String = ws.trimmed();
+    println("trimmed:");
+    println(tr.cstr());
+    println("trimmed len (expect 10):");
+    println(tr.len() == 10);
+    let csv: String = String::from_cstr("a;bb;ccc;");
+    println("split count (expect 4):");
+    let parts: Vec[String] = csv.split(';' as char);
+    println(parts.len() == 4);
+    println("parts[1]:");
+    let p1: String = parts.get(1);
+    println(p1.cstr());
+    let mut k: usize = 0;
+    while k < parts.len() {
+        let part: String = parts.get(k);
+        part.free_buf();
+        k = k + 1;
+    }
+    parts.free_buf();
+    sub2.free_buf();
+    uc.free_buf();
+    lc.free_buf();
+    tr.free_buf();
+    ws.free_buf();
 
     s.free_buf();
     return 0;
