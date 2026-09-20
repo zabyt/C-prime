@@ -5,9 +5,52 @@ on:
   pull_request:
 
 jobs:
-  test:
+  frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test
+
+  codegen:
+    runs-on: windows-latest
+    env:
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup-llvm
+      - run: cargo test --features codegen
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [frontend, codegen]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup-llvm
+      - name: Build release binary
+        run: cargo build --release --features codegen
+      - name: Stage archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item target\release\cprime-compiler.exe dist
+          Copy-Item README.md dist
+          Copy-Item LICENSE dist
+          Get-ChildItem dist
+      - name: Attach to release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $archive = "cprime-compiler-$env:GITHUB_REF_NAME-windows-x86_64.zip"
+          Compress-Archive -Path "dist\*" -DestinationPath $archive -Force
+          if (gh release view $env:GITHUB_REF_NAME --json tagName --jq .tagName 2>$null) {
+            gh release upload $env:GITHUB_REF_NAME $archive --clobber
+          } else {
+            gh release create $env:GITHUB_REF_NAME $archive --generate-notes
+          }

@@ -7,6 +7,7 @@
 
 
 
+include "vec.cp";
 extern fn malloc(size: usize) -> *mut void;
 extern fn free(ptr: *mut void) -> void;
 extern fn strlen(s: *const char) -> usize;

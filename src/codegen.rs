@@ -1036,15 +1036,29 @@ impl<'ctx, 'ast> Codegen<'ast, 'ctx> {
     
     fn gen_for(&mut self, s: &'ast ast::ForStmt) -> Result<(), CodegenError> {
         let (iterable, iter_ty) = self.emit_expr(&s.iterable)?;
-        if !matches!(iter_ty, CType::Str)
-            && !matches!(&iter_ty, CType::Pointer { pointee, .. } if **pointee == CType::Char)
-        {
+        let is_nul_terminated = matches!(iter_ty, CType::Str)
+            || matches!(&iter_ty, CType::Pointer { pointee, .. } if **pointee == CType::Char);
+        let bounded = matches!(
+            &iter_ty,
+            CType::Struct { name, .. } if name == "Vec" || name == "String"
+        );
+        if !is_nul_terminated && !bounded {
             return Err(unsupported(
                 &s.span,
-                "`for` over pointers currently requires a character pointer or string literal",
+                "`for` currently supports character pointers, string literals, `Vec`, and `String`",
             ));
         }
-        let iter = iterable.into_pointer_value();
+
+        let elem_cty = if !is_nul_terminated {
+            match &iter_ty {
+                CType::Struct { name, args } if name == "Vec" => args.first().cloned().unwrap_or(CType::Char),
+                CType::Struct { name, .. } if name == "String" => CType::Char,
+                _ => CType::Char,
+            }
+        } else {
+            CType::Char
+        };
+        let elem_llvm = self.llvm_type(&elem_cty)?;
 
         let i64 = self.context.i64_type();
         let idx_slot = self
@@ -1053,6 +1067,16 @@ impl<'ctx, 'ast> Codegen<'ast, 'ctx> {
             .map_err(|err| self.int_err(err))?;
         self.builder.build_store(idx_slot, i64.const_int(0, false)).map_err(|err| self.int_err(err))?;
 
+        let iter_slot = if bounded {
+            Some(
+                self.builder
+                    .build_alloca(iterable.get_type().into_struct_type(), "for.iter")
+                    .map_err(|err| self.int_err(err))?,
+            )
+        } else {
+            None
+        };
+
         let cond_bb = self.append_block("for.cond");
         let body_bb = self.append_block("for.body");
         let inc_bb = self.append_block("for.inc");
@@ -1060,39 +1084,64 @@ impl<'ctx, 'ast> Codegen<'ast, 'ctx> {
 
         self.builder.build_unconditional_branch(cond_bb).map_err(|err| self.int_err(err))?;
 
-        
         self.builder.position_at_end(cond_bb);
+        let data_ptr;
+        let bound: Option<BasicValueEnum<'ctx>>;
+        if let Some(slot) = iter_slot {
+            self.builder.build_store(slot, iterable).map_err(|err| self.int_err(err))?;
+            let st = iterable.get_type().into_struct_type();
+            let data_gep = self.builder.build_struct_gep(st, slot, 0, "for.data").map_err(|err| self.int_err(err))?;
+            let len_gep = self.builder.build_struct_gep(st, slot, 1, "for.len").map_err(|err| self.int_err(err))?;
+            data_ptr = self
+                .builder
+                .build_load(self.context.ptr_type(Default::default()), data_gep, "for.data")
+                .map_err(|err| self.int_err(err))?
+                .into_pointer_value();
+            let len = self.builder.build_load(i64, len_gep, "for.len").map_err(|err| self.int_err(err))?;
+            bound = Some(len.as_basic_value_enum());
+        } else {
+            data_ptr = iterable.into_pointer_value();
+            bound = None;
+        }
+
         let idx = self.builder.build_load(i64, idx_slot, "for.idx").map_err(|err| self.int_err(err))?.into_int_value();
-        let char_ty = self.llvm_type(&CType::Char)?;
-        let elem_ptr = self.gep(char_ty, iter, idx, "for.elem")?;
-        let elem = self
-            .builder
-            .build_load(self.context.i8_type(), elem_ptr, "for.val")
-            .map_err(|err| self.int_err(err))?
-            .into_int_value();
-        let nonzero = self
-            .builder
-            .build_int_compare(IntPredicate::NE, elem, self.context.i8_type().const_int(0, false), "for.cond")
-            .map_err(|err| self.int_err(err))?;
+        let elem_ptr = self.gep(elem_llvm, data_ptr, idx, "for.elem")?;
+        let elem;
+        let nonzero;
+        if let Some(b) = bound {
+            elem = self.builder.build_load(elem_llvm, elem_ptr, "for.val").map_err(|err| self.int_err(err))?;
+            nonzero = self
+                .builder
+                .build_int_compare(IntPredicate::ULT, idx, b.into_int_value(), "for.bound")
+                .map_err(|err| self.int_err(err))?;
+        } else {
+            let c = self
+                .builder
+                .build_load(self.context.i8_type(), elem_ptr, "for.val")
+                .map_err(|err| self.int_err(err))?
+                .into_int_value();
+            elem = c.as_basic_value_enum();
+            nonzero = self
+                .builder
+                .build_int_compare(IntPredicate::NE, c, self.context.i8_type().const_int(0, false), "for.cond")
+                .map_err(|err| self.int_err(err))?;
+        }
         self.builder.build_conditional_branch(nonzero, body_bb, exit_bb).map_err(|err| self.int_err(err))?;
 
-        
-        
         self.builder.position_at_end(body_bb);
         self.push_scope();
         let var_slot = self
             .builder
-            .build_alloca(self.context.i8_type(), &s.variable)
+            .build_alloca(elem_llvm, &s.variable)
             .map_err(|err| self.int_err(err))?;
         self.builder.build_store(var_slot, elem).map_err(|err| self.int_err(err))?;
-        self.define_var(&s.variable, var_slot, CType::Char);
+        self.define_var(&s.variable, var_slot, elem_cty);
         self.control_flow.push(ControlFlowTarget::Loop { continue_bb: inc_bb, exit_bb });
         self.gen_block(&s.body)?;
         self.control_flow.pop();
         self.pop_scope();
         self.branch_to(inc_bb);
 
-        
         self.builder.position_at_end(inc_bb);
         let next = self
             .builder
@@ -1470,8 +1519,8 @@ impl<'ctx, 'ast> Codegen<'ast, 'ctx> {
         }
 
         if let Some(method_name) = Self::binary_op_method_name(op) {
-            let (lv, lt) = self.emit_expr(lhs)?;
-            let receiver = match &lt {
+            let lt_static = self.static_ctype(lhs);
+            let receiver = match &lt_static {
                 CType::Struct { name, .. } => Some(name.clone()),
                 CType::Pointer { pointee, .. } => match &**pointee {
                     CType::Struct { name, .. } => Some(name.clone()),
@@ -1485,7 +1534,6 @@ impl<'ctx, 'ast> Codegen<'ast, 'ctx> {
                     return self.emit_method_call_ref(lhs, method_name, &arg_refs, span);
                 }
             }
-            let _ = lv;
         }
 
         let (lv, lt) = self.emit_expr(lhs)?;
@@ -1755,7 +1803,26 @@ fn emit_assign(
                 .iter()
                 .find(|(gf, _)| gf == field_name)
                 .map(|(_, ty)| ty.clone());
+            let prev_hint = self.struct_literal_hint.take();
+            if let Some(CType::Struct { name: dn, args }) = &ft
+                && !args.is_empty()
+                && args.iter().all(|a| !a.contains_generic())
+            {
+                let matches = match expr {
+                    ast::Expr::StructLiteral { name, .. } => name == dn,
+                    ast::Expr::Call { callee, .. } => matches!(
+                        callee.as_ref(),
+                        ast::Expr::Path { segments, .. }
+                            if segments.len() == 2 && &segments[0] == dn
+                    ),
+                    _ => false,
+                };
+                if matches {
+                    self.struct_literal_hint = Some((dn.clone(), args.clone()));
+                }
+            }
             let (value, vty) = self.emit_expr(expr)?;
+            self.struct_literal_hint = prev_hint;
             emitted.push((ft, value, vty));
         }
         let mut resolved_args = args
@@ -2380,15 +2447,48 @@ fn emit_assign(
         let printf = self.print_fn()?;
         let mut fmt = String::new();
         let mut call_args: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
-        for arg in args {
-            let (value, ty) = self.emit_expr(arg)?;
-            let (label, promoted) = self.printf_mapping(&value, &ty, span)?;
-            fmt.push_str(label);
-            match promoted {
-                Some(v) => call_args.push(v.into()),
-                None => call_args.push(value.into()),
+
+        let has_placeholder = if let ast::Expr::Literal(ast::LiteralExpr::String(s), _) = &args[0] {
+            s.contains("{}")
+        } else {
+            false
+        };
+
+        if has_placeholder {
+            let (s, _) = match &args[0] {
+                ast::Expr::Literal(ast::LiteralExpr::String(s), sp) => (s.as_str(), sp),
+                _ => unreachable!(),
+            };
+            let segments: Vec<&str> = s.split("{}").collect();
+            let placeholders = segments.len().saturating_sub(1);
+            if placeholders != args.len() - 1 {
+                return Err(unsupported(span, &format!("format string has {} placeholders but {} extra args were provided", placeholders, args.len() - 1)));
+            }
+            for (i, segment) in segments.iter().enumerate() {
+                let escaped = segment.replace('%', "%%");
+                fmt.push_str(&escaped);
+                if i < placeholders {
+                    let (value, ty) = self.emit_expr(&args[i + 1])?;
+                    let (label, promoted) = self.printf_mapping(&value, &ty, span)?;
+                    fmt.push_str(label);
+                    match promoted {
+                        Some(v) => call_args.push(v.into()),
+                        None => call_args.push(value.into()),
+                    }
+                }
+            }
+        } else {
+            for arg in args {
+                let (value, ty) = self.emit_expr(arg)?;
+                let (label, promoted) = self.printf_mapping(&value, &ty, span)?;
+                fmt.push_str(label);
+                match promoted {
+                    Some(v) => call_args.push(v.into()),
+                    None => call_args.push(value.into()),
+                }
             }
         }
+
         if name == "println" {
             fmt.push('\n');
         }
@@ -3343,6 +3443,131 @@ fn main() -> i32 {
     let inner: W[i32] = outer.val();
     if inner.val() == 5 { return 0; }
     return 1;
+}
+"#,
+        )
+        .unwrap();
+        assert!(ir.contains("define i32 @main"), "{ir}");
+    }
+
+    #[test]
+    fn nested_generic_constructor_in_struct_literal_uses_field_type_as_hint() {
+        let ir = check(
+            r#"
+struct Wrap[T] { v: T }
+impl Wrap[T] {
+    fn new(v: T) -> Wrap[T] { return Wrap { v: v }; }
+}
+struct Pair {
+    a: Wrap[i32],
+    b: Wrap[i64],
+}
+fn main() -> i32 {
+    let p: Pair = Pair { a: Wrap::new(3 as i32), b: Wrap::new(4 as i64) };
+    if p.a.v == 3 { return p.b.v as i32 - 1; }
+    return 9;
+}
+"#,
+        )
+        .unwrap();
+        assert!(ir.contains("define i32 @main"), "{ir}");
+        assert!(ir.contains("Wrap__new$si32"), "missing Wrap[i32] instance\n{ir}");
+        assert!(ir.contains("Wrap__new$si64"), "missing Wrap[i64] instance\n{ir}");
+    }
+
+    #[test]
+    fn format_checked_printing_splices_properly() {
+        let ir = check(
+            r#"
+fn main() -> i32 {
+    let x: i32 = 42;
+    let y: f64 = 3.14;
+    println("hello {} and {}!", x, y);
+    return 0;
+}
+"#,
+        )
+        .unwrap();
+        assert!(ir.contains("define i32 @main"), "{ir}");
+        assert!(ir.contains("hello %d and %f!\\0A"), "missing spliced format string in IR\n{ir}");
+    }
+
+    #[test]
+    fn for_loop_iterates_vec_and_string_buffers() {
+        let ir = check(
+            r#"
+struct Vec[T] { data: *mut T, length: usize, capacity: usize }
+struct String { data: *mut char, length: usize, capacity: usize }
+extern fn malloc(size: usize) -> *mut void;
+impl Vec[T] {
+    fn set_len(&mut self, data: *mut T, len: usize) {
+        self.data = data;
+        self.length = len;
+    }
+}
+impl String {
+    fn set_len(&mut self, data: *mut char, len: usize) {
+        self.data = data;
+        self.length = len;
+    }
+}
+fn main() -> i32 {
+    let mut v: Vec[i32] = Vec { data: null, length: 0, capacity: 0 };
+    v.set_len(malloc(3 * 4) as *mut i32, 3);
+    let mut p = v.data;
+    p[0] = 10;
+    p[1] = 20;
+    p[2] = 30;
+    let mut sum: i32 = 0;
+    for x in v {
+        sum = sum + x;
+    }
+    let mut e: Vec[i32] = Vec { data: null, length: 0, capacity: 0 };
+    for y in e {
+        sum = sum + y;
+    }
+    let mut s: String = String { data: null, length: 0, capacity: 0 };
+    s.set_len(malloc(4) as *mut char, 3);
+    let mut q = s.data;
+    q[0] = 'a' as char;
+    q[1] = 'b' as char;
+    q[2] = 'c' as char;
+    for c in s {
+        sum = sum + (c as i32);
+    }
+    if sum == 354 { return 0; }
+    return 1;
+}
+"#,
+        )
+        .unwrap();
+        assert!(ir.contains("define i32 @main"), "{ir}");
+    }
+
+    #[test]
+    fn binary_op_evaluates_side_effecting_operands_once() {
+        let ir = check(
+            r#"
+struct Counter { n: i64 }
+impl Counter {
+    fn new() -> Counter { return Counter { n: 0 }; }
+    fn bump(&mut self) -> i64 {
+        self.n = self.n + 1;
+        return self.n;
+    }
+}
+fn main() -> i32 {
+    let mut c: Counter = Counter::new();
+    let first: bool = c.bump() == 1;
+    if !first { return 1; }
+    if c.n != 1 { return 2; }
+    let mut a: Counter = Counter::new();
+    let mut b: Counter = Counter::new();
+    let both: bool = a.bump() != b.bump();
+    if both { return 3; }
+    if a.n != 1 { return 4; }
+    if b.n != 1 { return 5; }
+    return 0;
 }
 "#,
         )

@@ -179,6 +179,64 @@ pub enum TypeError {
     MissingLetType { span: SourceSpan, name: String },
 }
 
+impl TypeError {
+    pub fn span(&self) -> &SourceSpan {
+        match self {
+            TypeError::UndefinedVariable { span, .. }
+            | TypeError::UndefinedType { span, .. }
+            | TypeError::UndefinedFunction { span, .. }
+            | TypeError::UndefinedMethod { span, .. }
+            | TypeError::UnknownField { span, .. }
+            | TypeError::UnknownFieldAccess { span, .. }
+            | TypeError::NotAStruct { span, .. }
+            | TypeError::PrivateMemberAccess { span, .. }
+            | TypeError::InvalidOverride { span, .. }
+            | TypeError::FinalOverride { span, .. }
+            | TypeError::MissingField { span, .. }
+            | TypeError::DuplicateFieldInLiteral { span, .. }
+            | TypeError::DuplicateParam { span, .. }
+            | TypeError::DuplicateStructField { span, .. }
+            | TypeError::DuplicateGenericParam { span, .. }
+            | TypeError::DuplicateName { span, .. }
+            | TypeError::TypeMismatch { span, .. }
+            | TypeError::AlreadyDefined { span, .. }
+            | TypeError::AssignToImmutable { span, .. }
+            | TypeError::InvalidAssignTarget { span, .. }
+            | TypeError::AssignThroughConstPointer { span, .. }
+            | TypeError::IfConditionNotBool { span, .. }
+            | TypeError::WhileConditionNotBool { span, .. }
+            | TypeError::ArgCountMismatch { span, .. }
+            | TypeError::NotCallable { span, .. }
+            | TypeError::MethodRequiresReceiver { span, .. }
+            | TypeError::ReturnMismatch { span, .. }
+            | TypeError::MissingReturnValue { span, .. }
+            | TypeError::VoidReturnValue { span, .. }
+            | TypeError::BreakOutsideLoopOrSwitch { span, .. }
+            | TypeError::ContinueOutsideLoop { span, .. }
+            | TypeError::NonExhaustiveMatch { span, .. }
+            | TypeError::PatternMismatch { span, .. }
+            | TypeError::GenericArgCount { span, .. }
+            | TypeError::NotGeneric { span, .. }
+            | TypeError::RequiresGenericArgs { span, .. }
+            | TypeError::ImplGenericMismatch { span, .. }
+            | TypeError::SelfOutsideImpl { span, .. }
+            | TypeError::SelfOutsideMethod { span, .. }
+            | TypeError::TypeAsValue { span, .. }
+            | TypeError::FunctionAsValue { span, .. }
+            | TypeError::NotIndexable { span, .. }
+            | TypeError::IndexNotInteger { span, .. }
+            | TypeError::UnsupportedCast { span, .. }
+            | TypeError::NonNumericOperand { span, .. }
+            | TypeError::NonIntegerOperand { span, .. }
+            | TypeError::NonBoolOperand { span, .. }
+            | TypeError::DerefNonPointer { span, .. }
+            | TypeError::InvalidAddrOf { span, .. }
+            | TypeError::NotIterable { span, .. }
+            | TypeError::MissingLetType { span, .. } => span,
+        }
+    }
+}
+
 
 
 pub fn check_program(program: &Program) -> Vec<TypeError> {
@@ -818,6 +876,19 @@ impl TypeChecker {
                 let elem = match &iterable {
                     CType::Pointer { pointee, .. } => (**pointee).clone(),
                     CType::Str => CType::Char,
+                    CType::Struct { name, args } if name == "Vec" => {
+                        match args.first() {
+                            Some(t) => t.clone(),
+                            None => {
+                                self.errors.push(TypeError::NotIterable {
+                                    span: s.iterable.span().clone(),
+                                    ty: iterable.to_string(),
+                                });
+                                CType::Void
+                            }
+                        }
+                    }
+                    CType::Struct { name, .. } if name == "String" => CType::Char,
                     other => {
                         self.errors.push(TypeError::NotIterable {
                             span: s.iterable.span().clone(),
@@ -1093,6 +1164,16 @@ impl TypeChecker {
                             expected: 1,
                             found: 0,
                         });
+                    } else if let Expr::Literal(LiteralExpr::String(s), _) = &args[0] {
+                        let placeholders = s.matches("{}").count();
+                        let extra = args.len() - 1;
+                        if placeholders > 0 && placeholders != extra {
+                            self.errors.push(TypeError::ArgCountMismatch {
+                                span: span.clone(),
+                                expected: placeholders,
+                                found: extra,
+                            });
+                        }
                     }
                     return CType::Void;
                 }

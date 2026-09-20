@@ -13,7 +13,7 @@ use clap::Parser;
 use cprime_compiler::ast::Program;
 use cprime_compiler::lexer::Lexer;
 use cprime_compiler::parser::Parser as CpParser;
-use cprime_compiler::token::Token;
+use cprime_compiler::token::{SourceSpan, Token};
 
 
 #[derive(Debug, Parser)]
@@ -69,6 +69,25 @@ fn main() -> ExitCode {
     run(cli)
 }
 
+fn print_diag(source: &str, span: &SourceSpan) {
+    let loc = &span.start;
+    let Some(line) = source.lines().nth(loc.line.saturating_sub(1) as usize) else {
+        return;
+    };
+    let line = line.trim_end();
+    let width = if span.start.line == span.end.line {
+        span.end.column.saturating_sub(span.start.column).max(1) as usize
+    } else {
+        1
+    };
+    let col = loc.column.saturating_sub(1) as usize;
+    let nwidth = format!("{}", loc.line).len();
+    let pad = " ".repeat(nwidth);
+    eprintln!("{pad} |");
+    eprintln!("{:>nwidth$} | {line}", loc.line);
+    eprintln!("{pad} | {}{}", " ".repeat(col), "^".repeat(width));
+}
+
 fn run(cli: Cli) -> ExitCode {
     let source = match std::fs::read_to_string(&cli.input) {
         Ok(src) => src,
@@ -86,7 +105,8 @@ fn run(cli: Cli) -> ExitCode {
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
     let mut stack = Vec::new();
-    let source = match expand_includes(&source, &dir, &mut stack) {
+    let mut seen = std::collections::HashSet::new();
+    let source = match expand_includes(&source, &dir, &mut stack, &mut seen) {
         Ok(src) => src,
         Err(err) => {
             eprintln!("error: {err}");
@@ -99,6 +119,8 @@ fn run(cli: Cli) -> ExitCode {
         Ok(tokens) => tokens,
         Err(err) => {
             eprintln!("error: {err}");
+            let start = err.location().clone();
+            print_diag(&source, &SourceSpan::new(start.clone(), start));
             return ExitCode::FAILURE;
         }
     };
@@ -113,6 +135,7 @@ fn run(cli: Cli) -> ExitCode {
         Ok(program) => program,
         Err(err) => {
             eprintln!("error: {err}");
+            print_diag(&source, err.span());
             return ExitCode::FAILURE;
         }
     };
@@ -126,6 +149,7 @@ fn run(cli: Cli) -> ExitCode {
     if !errors.is_empty() {
         for err in &errors {
             eprintln!("error: {err}");
+            print_diag(&source, err.span());
         }
         eprintln!("error: type checking failed with {} error(s)", errors.len());
         return ExitCode::FAILURE;
@@ -277,6 +301,7 @@ fn expand_includes(
     source: &str,
     base_dir: &std::path::Path,
     stack: &mut Vec<std::path::PathBuf>,
+    seen: &mut std::collections::HashSet<std::path::PathBuf>,
 ) -> Result<String, String> {
     let mut out = String::new();
     for (i, line) in source.lines().enumerate() {
@@ -295,6 +320,9 @@ fn expand_includes(
                                 path.display()
                             ));
                         }
+                        if !seen.insert(canon.clone()) {
+                            continue;
+                        }
                         let text = std::fs::read_to_string(&path)
                             .map_err(|_| format!("include: cannot read `{}`", path.display()))?;
                         stack.push(canon);
@@ -302,7 +330,7 @@ fn expand_includes(
                             .parent()
                             .map(|p| p.to_path_buf())
                             .unwrap_or_else(|| std::path::PathBuf::from("."));
-                        out.push_str(&expand_includes(&text, &sub_dir, stack)?);
+                        out.push_str(&expand_includes(&text, &sub_dir, stack, seen)?);
                         stack.pop();
                         continue;
                     }

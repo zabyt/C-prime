@@ -24,6 +24,15 @@ pub enum ParseError {
     UnexpectedEof { span: SourceSpan, expected: String },
 }
 
+impl ParseError {
+    pub fn span(&self) -> &SourceSpan {
+        match self {
+            ParseError::UnexpectedToken { span, .. } => span,
+            ParseError::UnexpectedEof { span, .. } => span,
+        }
+    }
+}
+
 
 
 

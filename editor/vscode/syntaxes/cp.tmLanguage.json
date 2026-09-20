@@ -1,0 +1,171 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "C-Prime",
+  "scopeName": "source.cprime",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#characters" },
+    { "include": "#numbers" },
+    { "include": "#declarations" },
+    { "include": "#impl-decl" },
+    { "include": "#fn-def" },
+    { "include": "#keywords" },
+    { "include": "#self" },
+    { "include": "#types" },
+    { "include": "#constants" },
+    { "include": "#modifiers" },
+    { "include": "#call" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double",
+          "match": "\"(\\\\.|[^\"\\\\])*\""
+        }
+      ]
+    },
+    "characters": {
+      "patterns": [
+        {
+          "name": "string.quoted.single",
+          "match": "'(\\\\.|[^'\\\\])*'"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric",
+          "match": "\\b0[xX][0-9a-fA-F_]+\\b"
+        },
+        {
+          "name": "constant.numeric",
+          "match": "\\b0[bB][01_]+\\b"
+        },
+        {
+          "name": "constant.numeric",
+          "match": "\\b0[oO][0-7_]+\\b"
+        },
+        {
+          "name": "constant.numeric",
+          "match": "\\b\\d+(_?\\d)*(\\.(\\d+(_?\\d)*)?)?([eE][+-]?\\d+(_?\\d)*)?\\b"
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "name": "storage.type.cprime",
+          "match": "\\b(struct|class|enum|namespace)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "2": {
+              "name": "entity.name.type.cprime"
+            }
+          }
+        },
+        {
+          "name": "keyword.declaration.cprime",
+          "match": "\\b(include)\\b"
+        }
+      ]
+    },
+    "impl-decl": {
+      "patterns": [
+        {
+          "name": "storage.type.cprime",
+          "match": "\\b(impl)\\s+([A-Za-z_][A-Za-z0-9_]*)(\\[[^\\]]*\\])?",
+          "captures": {
+            "2": {
+              "name": "entity.name.type.cprime"
+            }
+          }
+        }
+      ]
+    },
+    "fn-def": {
+      "patterns": [
+        {
+          "name": "keyword.control.cprime",
+          "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "2": {
+              "name": "entity.name.function.cprime"
+            }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.cprime",
+          "match": "\\b(if|else|while|for|in|match|switch|case|default|break|continue|return|as|extern|import|use|using|pub|private|protected|const|virtual|override|final|abstract|static|struct|class|enum|impl|namespace|let|mut|fn)\\b"
+        }
+      ]
+    },
+    "self": {
+      "patterns": [
+        {
+          "name": "variable.language.cprime",
+          "match": "\\b(Self|self)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.cprime",
+          "match": "\\b(void|char|bool|i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|f32|f64|isize|usize)\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.cprime",
+          "match": "\\b(true|false|null)\\b"
+        }
+      ]
+    },
+    "modifiers": {
+      "patterns": [
+        {
+          "name": "storage.modifier.cprime",
+          "match": "\\*(mut|const)\\b"
+        }
+      ]
+    },
+    "call": {
+      "patterns": [
+        {
+          "name": "entity.name.function.cprime",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(?=\\s*\\()"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.cprime",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+        }
+      ]
+    }
+  }
+}

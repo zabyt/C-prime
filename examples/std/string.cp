@@ -7,6 +7,7 @@
 
 
 
+include "vec.cp";
 struct String {
     data: *mut char,
     length: usize,

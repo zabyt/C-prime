@@ -1,0 +1,31 @@
+name: Setup LLVM 22
+description: Install a clang-cl and the exact LLVM 22.1.8 bundle for the codegen feature
+runs:
+  using: composite
+  steps:
+    - name: Install clang-cl
+      shell: pwsh
+      run: choco install llvm -y --no-progress
+    - name: Install LLVM 22.1.8 bundle
+      shell: pwsh
+      run: |
+        $dst = "D:\LLVM22"
+        New-Item -ItemType Directory -Force -Path $dst | Out-Null
+        $target = Join-Path $dst "clang+llvm-22.1.8-x86_64-pc-windows-msvc"
+        if (Test-Path (Join-Path $target "bin\llvm-config.exe")) { exit 0 }
+        $urls = @(
+          "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/clang+llvm-22.1.8-x86_64-pc-windows-msvc.tar.xz",
+          "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-win64.tar.xz"
+        )
+        $archive = Join-Path $env:RUNNER_TEMP "llvm.tar.xz"
+        foreach ($url in $urls) {
+          curl.exe -L --fail --silent --show-error -o $archive $url
+          if ($LASTEXITCODE -eq 0 -and (Get-Item $archive).Length -gt 1MB) { break }
+        }
+        if (-not (Test-Path $archive)) { throw "could not download LLVM 22.1.8 from github.com/llvm/llvm-project releases" }
+        tar.exe -xf $archive -C $dst
+        $extracted = Get-ChildItem $dst -Directory | Where-Object { Test-Path "$($_.FullName)\bin\llvm-config.exe" } | Select-Object -First 1
+        if (-not $extracted) { throw "LLVM archive did not contain bin\llvm-config.exe" }
+        if ($extracted.FullName -ne $target) {
+          Move-Item -LiteralPath $extracted.FullName -Destination $target -Force
+        }

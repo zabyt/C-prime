@@ -1,3 +1,4 @@
+include "string.cp";
 extern fn malloc(size: usize) -> *mut void;
 extern fn free(ptr: *mut void) -> void;
 extern fn realloc(ptr: *mut void, size: usize) -> *mut void;

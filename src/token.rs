@@ -623,6 +623,25 @@ pub enum LexError {
     InvalidNumber { location: SourceLocation },
 }
 
+impl LexError {
+    pub fn location(&self) -> &SourceLocation {
+        match self {
+            LexError::InvalidCharacter { location, .. }
+            | LexError::UnterminatedString { location, .. }
+            | LexError::UnterminatedChar { location, .. }
+            | LexError::UnterminatedBlockComment { location, .. }
+            | LexError::EmptyCharLiteral { location, .. }
+            | LexError::MultiCharLiteral { location, .. }
+            | LexError::InvalidEscape { location, .. }
+            | LexError::InvalidHexEscape { location, .. }
+            | LexError::InvalidUnicodeEscape { location, .. }
+            | LexError::InvalidRadixLiteral { location, .. }
+            | LexError::IntegerOverflow { location, .. }
+            | LexError::InvalidNumber { location, .. } => location,
+        }
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
