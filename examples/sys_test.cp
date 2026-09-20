@@ -34,18 +34,30 @@ fn main() -> i32 {
         printf("PATH is set\n");
     }
 
-    let buf = read_file_all("examples\\sys_test.cp");
-    if buf == null {
+    let big: *mut char = malloc(1000) as *mut char;
+    let mut k: i64 = 0;
+    while k < 1000 {
+        big[k as usize] = 'x' as char;
+        k = k + 1;
+    }
+    if write_file_all("_big_out.txt", big, 1000) != 0 {
         return 3;
     }
-    printf("read %lld chars from sys_test.cp\n", strlen(buf) as i64);
-    free(buf as *mut void);
+    let bg = read_file_all("_big_out.txt");
+    if bg == null {
+        return 3;
+    }
+    if strlen(bg) != 1000 {
+        return 3;
+    }
+    printf("read %lld chars from _big_out.txt\n", strlen(bg) as i64);
+    free(bg as *mut void);
 
-    let w = write_file_all("examples\\_sys_out.txt", "hello", 5);
+    let w = write_file_all("_sys_out.txt", "hello", 5);
     if w != 0 {
         return 4;
     }
-    let back = read_file_all("examples\\_sys_out.txt");
+    let back = read_file_all("_sys_out.txt");
     if back == null {
         return 5;
     }

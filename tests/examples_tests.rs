@@ -71,7 +71,7 @@ fn demo_examples_compile_and_run() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(out.status.success(), "link failed for {name}:\n{stderr}");
 
-        let run = Command::new(&exe).output().unwrap();
+        let run = Command::new(&exe).current_dir(&runs).output().unwrap();
         let stdout = String::from_utf8_lossy(&run.stdout);
         let stderr = String::from_utf8_lossy(&run.stderr);
         assert!(
