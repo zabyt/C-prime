@@ -152,6 +152,7 @@ fn run<'ast, T>(
         string_counter: 0,
         printf_fn: None,
         struct_literal_hint: None,
+        array_hint: None,
         control_flow: Vec::new(),
     };
     cg.gen_program(program)?;
@@ -248,6 +249,7 @@ struct Codegen<'ast, 'ctx> {
     
     
     struct_literal_hint: Option<(String, Vec<CType>)>,
+    array_hint: Option<CType>,
     
     
     
@@ -890,14 +892,12 @@ impl<'ctx, 'ast> Codegen<'ast, 'ctx> {
         let (init_value, init_ty) = match &s.init {
                 Some(init) => {
                     let prev_hint = self.struct_literal_hint.take();
+                    let prev_array_hint = self.array_hint.take();
                     if let Some(declared) = &s.ty {
                         let declared_ty = self.ctype_from_ast(declared, &s.span)?;
                         if let CType::Struct { name: dn, args } = &declared_ty
                             && !args.is_empty()
                         {
-                            
-                            
-                            
                             let matches = match init {
                                 ast::Expr::StructLiteral { name, .. } => name == dn,
                                 ast::Expr::Call { callee, .. } => matches!(
@@ -911,9 +911,13 @@ impl<'ctx, 'ast> Codegen<'ast, 'ctx> {
                                 self.struct_literal_hint = Some((dn.clone(), args.clone()));
                             }
                         }
+                        if let CType::Array { element, .. } = &declared_ty {
+                            self.array_hint = Some((**element).clone());
+                        }
                     }
                     let result = self.emit_expr(init);
                     self.struct_literal_hint = prev_hint;
+                    self.array_hint = prev_array_hint;
                     result?
                 }
             None => {
@@ -1347,7 +1351,9 @@ impl<'ctx, 'ast> Codegen<'ast, 'ctx> {
         span: &SourceSpan,
     ) -> Result<(BasicValueEnum<'ctx>, CType), CodegenError> {
         let (val, elem_ty) = self.emit_expr(value)?;
-        let llvm_elem = self.llvm_type(&elem_ty)?;
+        let concrete = self.array_hint.take().unwrap_or_else(|| default_concrete(&elem_ty));
+        let llvm_elem = self.llvm_type(&concrete)?;
+        let val = self.coerce(val, &elem_ty, &concrete)?;
         let len = match count {
             ast::Expr::Literal(ast::LiteralExpr::Integer(n), _) if *n >= 0 => *n as u32,
             _ => return Err(unsupported(span, "array length must be a compile-time integer")),
@@ -1364,7 +1370,7 @@ impl<'ctx, 'ast> Codegen<'ast, 'ctx> {
             self.builder.build_store(ptr, val)
                 .map_err(|e| CodegenError::Internal(format!("store failed: {e}")))?;
         }
-        let arr_ty = CType::Array { element: Box::new(elem_ty), length: len as u64 };
+        let arr_ty = CType::Array { element: Box::new(concrete), length: len as u64 };
         Ok((alloca.as_basic_value_enum(), arr_ty))
     }
 
@@ -1377,12 +1383,13 @@ impl<'ctx, 'ast> Codegen<'ast, 'ctx> {
             return Err(unsupported(span, "empty array literal needs a type annotation"));
         }
         let (first_val, elem_ty) = self.emit_expr(&elements[0])?;
-        let llvm_elem = self.llvm_type(&elem_ty)?;
+        let concrete = self.array_hint.take().unwrap_or_else(|| default_concrete(&elem_ty));
+        let llvm_elem = self.llvm_type(&concrete)?;
+        let first_val = self.coerce(first_val, &elem_ty, &concrete)?;
         let len = elements.len() as u32;
         let array_ty = llvm_elem.array_type(len);
         let alloca = self.builder.build_alloca(array_ty, "array")
             .map_err(|e| CodegenError::Internal(format!("alloca failed: {e}")))?;
-        
         let idx0 = self.context.i32_type().const_int(0, false);
         let ptr0 = unsafe {
             self.builder.build_gep(llvm_elem, alloca, &[idx0], "elem_ptr")
@@ -1390,9 +1397,9 @@ impl<'ctx, 'ast> Codegen<'ast, 'ctx> {
         };
         self.builder.build_store(ptr0, first_val)
             .map_err(|e| CodegenError::Internal(format!("store failed: {e}")))?;
-        
         for (i, elem) in elements[1..].iter().enumerate() {
-            let (val, _) = self.emit_expr(elem)?;
+            let (val, vty) = self.emit_expr(elem)?;
+            let val = self.coerce(val, &vty, &concrete)?;
             let idx = self.context.i32_type().const_int((i + 1) as u64, false);
             let ptr = unsafe {
                 self.builder.build_gep(llvm_elem, alloca, &[idx], "elem_ptr")
@@ -1401,7 +1408,7 @@ impl<'ctx, 'ast> Codegen<'ast, 'ctx> {
             self.builder.build_store(ptr, val)
                 .map_err(|e| CodegenError::Internal(format!("store failed: {e}")))?;
         }
-        let arr_ty = CType::Array { element: Box::new(elem_ty), length: len as u64 };
+        let arr_ty = CType::Array { element: Box::new(concrete), length: len as u64 };
         Ok((alloca.as_basic_value_enum(), arr_ty))
     }
 

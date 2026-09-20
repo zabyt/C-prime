@@ -41,6 +41,7 @@ fn every_example_passes_front_end_check() {
 fn demo_examples_compile_and_run() {
     let runnable = [
         "advanced_demo",
+        "all_features",
         "beginner_example",
         "calculator",
         "demo",

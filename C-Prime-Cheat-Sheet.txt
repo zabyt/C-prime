@@ -3,274 +3,260 @@ C-Prime Syntax Cheat Sheet
 
 What is C-Prime?
 ----------------
-C-Prime is a small systems-style programming language built as a Rust-style compiler project.
-It supports functions, variables, structs, methods, generics, loops, conditionals, pointers,
-and pattern matching.
-
-The compiler front end handles:
-- lexing
-- parsing
-- semantic/type checking
-- optional LLVM-based code generation when enabled
+C-Prime is a small systems programming language with a Rust-inspired syntax.
+The compiler lexes, parses, typechecks, and (with the codegen feature)
+generates LLVM IR and native executables via clang.
 
 Project usage
 -------------
-From the project root, run:
+    cargo run --quiet -- --lex file.cp          # dump tokens
+    cargo run --quiet -- --parse file.cp        # parse + AST summary
+    cargo run --quiet -- --check file.cp        # typecheck
+    cargo run --quiet --features codegen -- --check file.cp
 
-    cargo run --quiet -- --lex file.cp
-    cargo run --quiet -- --parse file.cp
-    cargo run --quiet -- --check file.cp
+With LLVM codegen enabled:
 
-The most useful command is:
+    cargo run --quiet --features codegen -- --emit-llvm out.ll file.cp
+    cargo run --quiet --features codegen -- --link -o out.exe file.cp
+    cargo run --quiet --features codegen -- --link --link-lib NAME --lib-path DIR -o out.exe file.cp
 
-    cargo run --quiet -- --check your_program.cp
+Test suites:
 
-It verifies that the code is accepted by the compiler.
+    cargo test                                       # front-end tests
+    cargo test --features codegen                    # full suite incl. exe tests
 
-1. Imports
-----------
+1. Files and includes
+---------------------
+    include "std/vec.cp";
 
-    import std.io;
-
-Dot-separated module paths are allowed.
+- Paths are relative to the including file.
+- Duplicates are detected and skipped; recursion is rejected.
 
 2. Functions
 ------------
+    fn add(a: i32, b: i32) -> i32 {
+        return a + b;
+    }
 
     fn main() -> i32 {
         return 0;
     }
 
-    fn add(a: i32, b: i32) -> i32 {
-        let total: i32 = a + b;
-        return total;
-    }
-
-Function syntax:
-- fn name(params) -> return_type {
-- return statements can be used with or without a value
+- Every statement ends with `;`.
+- A value-returning function must end with `return expr;`.
+- No implicit return; `if` is a statement, not an expression.
 
 3. Variables
--------------
-
+------------
     let x: i32 = 10;
-    let mut total: i32 = 0;
+    let mut y: i32 = 0;
+    y = y + x;
 
-    x = x + 1;
-    total = total + x;
-
-Notes:
-- let declares a variable
-- mut makes it mutable
-- type annotations are usually explicit in examples
+- `let` declares a variable; `mut` makes it mutable.
+- Type annotations are required on `let` without initializer.
 
 4. Conditionals
 ---------------
-
     if x > 0 {
         println(x);
-    } else {
+    } else if x == 0 {
         println(0);
-    }
-
-    if a == b {
-        return 1;
+    } else {
+        println(-x);
     }
 
 5. Loops
----------
-
-While loop:
-
+--------
+    // while
     let mut i: i32 = 0;
     while i < 10 {
         i = i + 1;
     }
 
-For loop:
+    // for over Vec[T]
+    let mut v: Vec[i32] = Vec::new();
+    v.push(1);
+    for e in v { println(e); }
 
-    for ch in "C-Prime" {
-        println(ch);
+    // for over String
+    for ch in "hello" { println(ch); }
+
+- `break` and `continue` are supported in both loops.
+
+6. Switch
+---------
+    switch value {
+        case 1: printf("one\n"); break;
+        case 2: printf("two\n"); break;
+        default: printf("other\n"); break;
     }
 
-6. Structs
-----------
+7. Match
+--------
+    let x: i32 = match 2 {
+        1 => 10,
+        2 => 20,
+        _ => 0,
+    };
 
+- Patterns: integer/char/bool literals, `_` wildcard, `name` binding.
+- Match can be used as a value expression or as a statement.
+
+8. Structs
+----------
     struct Point {
         x: f64,
         y: f64
     }
 
-Struct values are instantiated like this:
-
-    let p: Point = Point { x: 1.5, y: 2.5 };
-
-7. Impl blocks and methods
---------------------------
-
     impl Point {
         fn new(x: f64, y: f64) -> Point {
             return Point { x: x, y: y };
         }
-
         fn add(self, other: Point) -> Point {
             return Point { x: self.x + other.x, y: self.y + other.y };
         }
     }
 
-Usage:
+    let p: Point = Point::new(1.0, 2.0);
 
-    let a: Point = Point::new(1.0, 2.0);
-    let b: Point = Point::new(3.0, 4.0);
-    let c: Point = a.add(b);
+- `self` by value, `&self` by const ref, `&mut self` by mutable ref.
+- Static methods have no `self` parameter.
+- Struct literals: `Point { x: 1.0, y: 2.0 }` (fields inferred from type).
 
-8. Generics
+9. Generics
 -----------
+    fn swap[T](a: T, b: T) -> T { return b; }
 
-    fn swap[T](a: *mut T, b: *mut T) {
-        let tmp: T = *a;
-        *a = *b;
-        *b = tmp;
-        return;
+    struct Box[T] { value: T }
+    impl Box[T] {
+        fn new(v: T) -> Box[T] { return Box[T] { value: v }; }
+        fn get(self) -> T { return self.value; }
     }
 
-The generic type parameter appears in square brackets after the function name.
+- Multiple params: `struct Pair[A, B] { first: A, second: B }`
+- Generic functions: `fn name[T](...)`
+- Generic static calls: `Box::new(v)` (args inferred from context).
 
-9. Pointers
------------
+10. Enums
+---------
+    enum Color { Red, Green, Blue }
+    enum class Grade : i32 { C = 2, B = 3, A = 4 }
 
-    let mut value: i32 = 42;
-    let ptr: *mut i32 = &mut value;
-    *ptr = 99;
+- Enum variants evaluate to integer values (index or explicit value).
+- `Color::Green` is `i32` value 1.
 
-Available pointer styles include:
-- *const T
-- *mut T
+11. Type aliases and constants
+------------------------------
+    using Number = i32;
+    const ANSWER: Number = 42;
 
-10. Match expressions
----------------------
-
-    match value {
-        0 => println("zero"),
-        1 => println("one"),
-        _ => println("other"),
-    }
-
-Pattern examples:
-- literal values such as 0, 1, true
-- wildcard _ as default branch
-
-11. Printing
+12. Pointers
 ------------
+    let mut val: i32 = 42;
+    let ptr: *mut i32 = &mut val;
+    *ptr = 99;
+    let rp: *const i32 = &val;
+    let np: *mut i32 = null;
 
-    println("hello");
-    println(42);
-    println(3.14);
+- `*mut T` and `*const T` for mutable/const pointers.
+- `&` takes address, `*` dereferences.
+- `null` is a pointer literal; pointer == null works.
 
-12. Primitive types
--------------------
+13. Casting
+-----------
+    let n: i32 = 3.9 as i32;          // 3
+    let c: char = (48 + 1) as char;   // '1'
+    let s: *const char = "hello";
 
-- bool
-- char
-- i8, i16, i32, i64, i128
-- u8, u16, u32, u64, u128
-- f32, f64
-- isize, usize
-- void
+- `as` casts between numeric types, char <-> int, pointer <-> pointer.
+- Parentheses are needed for chained: `(*ptr) as i64`.
 
-13. Example program
--------------------
-
-    import std.io;
-
-    struct Vector2 {
-        x: f64,
-        y: f64
-    }
-
-    impl Vector2 {
-        fn new(x: f64, y: f64) -> Vector2 {
-            return Vector2 { x: x, y: y };
-        }
-
-        fn length(self) -> f64 {
-            return self.x * self.x + self.y * self.y;
-        }
-    }
-
-    fn main() -> i32 {
-        let v: Vector2 = Vector2::new(2.0, 3.0);
-        println(v.length());
-        return 0;
-    }
-
-14. Quick tips
---------------
-- Use semicolons to terminate statements.
-- Control flow uses braces blocks.
-- Return types must match what the function returns.
-- Generic functions are written like fn name[T](...)
-- Use match arms as pattern => action
-
-15. Calling C (extern), null, casts
------------------------------------
-
+14. Calling C (extern)
+-----------------------
     extern fn malloc(size: usize) -> *mut void;
+    extern fn free(p: *mut void);
     extern fn strlen(s: *const char) -> usize;
 
     let p: *mut i32 = malloc(64) as *mut i32;
-    if p == null {
-        // ...
-    }
-    free(p);
+    free(p as *mut void);
 
-    let n: i32 = 3.9 as i32;          // 3
-    let c: char = (48 + 1) as char;   // '1'
-    let s: *const char = "hi";        // literal coerces to *const char
+- Variadic: `extern fn printf(fmt: *const char, ...) -> i32;`
+- Bindings live in `examples/std/ctypes.cp`.
 
-- null is a literal for any pointer type
-- pointer == pointer and pointer == null comparisons work
-- malloc/free/strlen/modf/... are pre-bound in examples/std/ctypes.cp
+15. Printing
+------------
+    println("hello");         // prints string + newline
+    println(42);              // prints integer
+    println(3.14);            // prints float
+    println(true);            // prints 1
 
-16. Including files
+    // Format-checked printing with {}
+    println("sum is {} plus {} = {}", a, b, sum);
+
+- `{}` placeholders must match extra argument count (typechecked).
+- Each `{}` is replaced by the corresponding printf format (%d, %lld, %f, %s, %p).
+
+16. Primitive types
 -------------------
+    bool, char, void
+    i8, i16, i32, i64, i128
+    u8, u16, u32, u64, u128
+    f32, f64
+    isize, usize
 
-    include "std/raylib.cp";
-    include "std/ctypes.cp";
+17. Operators
+-------------
+    Arithmetic:  +  -  *  /  %
+    Comparison:  ==  !=  <  >  <=  >=
+    Logical:     &&  ||  !
+    Bitwise:     &  |  ^  ~  <<  >>
+    Assignment:  =  +=  -=  *=  /=  %=
+    Address:     & (unary)  * (deref)
 
-- Paths are relative to the including file; recursion is allowed
-  (cycles are rejected).
+18. SizeOf
+----------
+    let s: usize = sizeOf[i32]() as usize;
 
-17. Building executables (codegen feature)
------------------------------------------
+- Syntax: `sizeOf[Type]()`
+- Returns `usize`.
 
-    cargo run --quiet --features codegen -- --check file.cp
-    cargo run --quiet --features codegen -- --emit-llvm out.ll file.cp
-    cargo run --quiet --features codegen -- --link -o out.exe file.cp
+19. Standard library (examples/std/)
+-------------------------------------
+    vec.cp      Vec[T]       push/get/set/pop/len/is_empty/insert/remove/last/free_buf
+    string.cp   String       new/from_cstr/push/append/len/at/cstr/equals_cstr/parse_i64/
+                              from_i64/from_f64/index_of/contains/starts_with/ends_with/
+                              compare/substring/trimmed/to_upper/to_lower/split/free_buf
+    map.cp      IntMap       set/get/contains/remove/len/free_buf
+                StrIntMap    increment/get/find/key/count/len/free_buf
+    hashmap.cp  HashMapStr   put/find/contains/remove/keys/len/free_buf
+                HashMapI64   put/find/contains/remove/keys/len/free_buf
+                HashSetStr   add/contains/remove/keys/len/free_buf
+                HashSetI64   add/contains/remove/keys/len/free_buf
+    ini.cp      Ini          parse/has/get/set/valid/section_names/key_names/free_buf
+    sys.cp      Rng          new/range/next
+                env_get, time_s, sleep_ms, cmd_line, read_file_all, write_file_all
+    io.cp       open_read/open_write/read_bytes/write_bytes/read_whole_file/write_whole_file
+                read_line/close/seek/file_size/delete_file/rename_file
+    json.cp     JsonParser   root/kind/member_count/key_at/get_key/child_at/as_str/
+                              as_number/as_bool/is_null/has_key/free_buf
+    ctypes.cp   malloc/free/calloc/realloc/strlen/memcpy/memset/memcmp/atoi/atol/atof/
+                strcmp/strcpy/toupper/tolower/abs/labs/fabs/floor/ceil/round/sqrt/pow/
+                fmod/modf/rand/srand
 
-Extra libraries / search paths:
+20. For-loop iteration
+----------------------
+- Over `Vec[T]`: element type is `T`
+- Over `String`: element type is `char`
+- Over `*const char` / string literals: element type is `char`
 
-    --link-lib raylibdll --lib-path ..\..\third_party\raylib
-
-18. Language gotchas
+21. Language gotchas
 --------------------
-- if is a statement: no let x = if ...  (and no implicit return)
-- A value-returning function must end with explicit return expr;
-- Every statement ends with a trailing semicolon
-- & / | bind looser than == / !=: write (mask & bit) != 0
-- const NAME: ty = value; needs the type annotation
-- No arrays: use malloc + buf[i] pointer indexing
-- Str is not a valid named type; use *const char
-
-19. Best validation command
----------------------------
-
-    cargo run --quiet --features codegen -- --check examples/feature_demo.cp
-
-If it prints a success message like:
-
-    check succeeded: ... no semantic errors
-
-then the source is accepted by the language front end.
+- `if` is a statement, not an expression: no `let x = if ...`
+- No implicit return: a function returning a value needs `return expr;`
+- Every statement ends with `;`
+- `&` and `|` bind looser than `==` / `!=`: write `(a & b) != 0`
+- Pointer arithmetic (ptr + 1) is not supported; use `buf[i]`
+- Array literals `[1, 2, 3]` are parsed/typechecked but codegen is incomplete
 
 This guide reflects the language features currently implemented in this project.

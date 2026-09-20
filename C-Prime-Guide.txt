@@ -3,254 +3,379 @@ C-Prime Language Guide
 
 What is C-Prime?
 -----------------
-C-Prime is a small systems-style programming language designed as a compiler project.
-It supports a Rust-like syntax with a few C-like ideas: structs, impl blocks, functions,
-loops, pattern matching, generics, and pointer-based operations.
+C-Prime is a small systems programming language with a Rust-like syntax. It
+supports structs with impl blocks, generics, pattern matching, pointers,
+enums, and a hand-written standard library covering vectors, strings,
+hash maps, file I/O, JSON, and more.
 
-This project is a compiler front end: it lexes, parses, type-checks, and can generate
-LLVM IR when the optional codegen feature is enabled.
+The compiler is written in Rust. The front end (lexer, parser, typechecker)
+has no external dependencies. The optional LLVM back end generates native
+executables via clang.
 
-Files use the .cp extension.
+Source files use the `.cp` extension.
 
-Basic syntax
-------------
+Quick start
+-----------
+    # typecheck a program
+    cargo run --quiet -- --check examples/demo.cp
 
-Importing modules
+    # compile and run
+    cargo run --quiet --features codegen -- examples/demo.cp --link -o demo.exe
+    ./demo.exe
+
+Language overview
 -----------------
-import std.io;
 
-Function definition
--------------------
-fn main() -> i32 {
-    return 0;
-}
+### Imports and includes
 
-Variables
----------
-let x: i32 = 10;
-let mut total: f64 = 0.0;
+C-Prime uses `include` for file splicing (before lexing):
 
-Assignments:
-    x = x + 1;
+    include "std/vec.cp";
+    include "std/string.cp";
 
-Conditionals
-------------
-if value > 0 {
-    println(value);
-} else {
-    println(0);
-}
+Paths are relative to the including file. Duplicates are skipped; cycles are
+rejected. The `import` keyword is parsed but acts as a no-op.
 
-Loops
------
-while i < 10 {
-    i = i + 1;
-}
+### Functions
 
-for ch in "C-Prime" {
-    println(ch);
-}
-
-Structs
--------
-struct Point {
-    x: f64,
-    y: f64
-}
-
-impl Point {
-    fn new(x: f64, y: f64) -> Point {
-        return Point { x: x, y: y };
+    fn add(a: i32, b: i32) -> i32 {
+        return a + b;
     }
 
-    fn add(self, other: Point) -> Point {
-        return Point { x: self.x + other.x, y: self.y + other.y };
+    fn main() -> i32 {
+        println(add(2, 3));   // prints 5
+        return 0;
     }
-}
 
-Methods are called like this:
-    let p: Point = Point::new(1.0, 2.0);
-    let q: Point = p.add(Point::new(3.0, 4.0));
+- Explicit `return` is required for value-returning functions.
+- No implicit return from the last expression.
+- Variadic C functions: `extern fn printf(fmt: *const char, ...) -> i32;`
 
-Generics
---------
-fn swap[T](a: *mut T, b: *mut T) {
-    let tmp: T = *a;
-    *a = *b;
-    *b = tmp;
-    return;
-}
+### Variables and mutability
 
-Pointers
---------
-*mut T and *const T are supported for generic pointer logic.
+    let x: i32 = 10;
+    let mut y: i32 = 0;
+    y = y + x;
 
-Example:
-    let mut v: i32 = 9;
-    let ptr: *mut i32 = &v;
-    *ptr = 10;
+- `let` declares a binding; `mut` allows reassignment.
+- Type annotation is required when there is no initializer.
 
-Pattern matching
-----------------
-match value {
-    0 => println("zero"),
-    1 => println("one"),
-    _ => println("other"),
-}
+### Compound assignment
 
-Calling C functions (extern)
-----------------------------
-Any C function can be declared with `extern fn` and then called directly.
-The parameter and return types map 1:1 to C types:
+    x += 1;
+    x -= 2;
+    x *= 3;
+    x /= 4;
+    x %= 5;
 
-    extern fn strlen(s: *const char) -> usize;
+### Conditionals
+
+    if score >= 90 {
+        println("A");
+    } else if score >= 80 {
+        println("B");
+    } else {
+        println("C");
+    }
+
+### While loops
+
+    let mut i: i32 = 0;
+    while i < 10 {
+        i = i + 1;
+    }
+
+### Break and continue
+
+    while true {
+        if done { break; }
+        if skip { i = i + 1; continue; }
+        process(i);
+        i = i + 1;
+    }
+
+### For loops
+
+Iterate over `Vec[T]` (element is `T`) or `String` (element is `char`):
+
+    let mut names: Vec[String] = Vec::new();
+    names.push(String::from_cstr("Alice"));
+    for name in names {
+        println(name.cstr());
+    }
+
+    for ch in "Hello" {
+        println(ch);
+    }
+
+### Switch
+
+    switch grade {
+        case 90: println("A"); break;
+        case 80: println("B"); break;
+        default: println("C"); break;
+    }
+
+### Match
+
+    let label: i32 = match code {
+        200 => 0,
+        404 => 1,
+        _ => 2,
+    };
+
+    // binding pattern
+    match 42 {
+        n => printf("got %lld\n", n as i64),
+    }
+
+- Patterns: integer/char/bool literals, `_` wildcard, `name` binding.
+- Match can be used as an expression (returns a value) or as a statement.
+- Exhaustive: non-bool match must have a `_` arm; bool match needs both `true`
+  and `false` or `_`.
+
+### Structs and methods
+
+    struct Point {
+        x: f64,
+        y: f64
+    }
+
+    impl Point {
+        fn new(x: f64, y: f64) -> Point {
+            return Point { x: x, y: y };
+        }
+
+        fn add(self, other: Point) -> Point {
+            return Point { x: self.x + other.x, y: self.y + other.y };
+        }
+
+        fn dist(self) -> f64 {
+            return (self.x * self.x + self.y * self.y);
+        }
+    }
+
+- `self` by value, `&self` for const access, `&mut self` for mutation.
+- Static methods have no `self` parameter.
+- Struct literals: `Point { x: 1.0, y: 2.0 }` or `Point::new(1.0, 2.0)`.
+
+### Generics
+
+    fn swap[T](a: T, b: T) -> T {
+        return b;
+    }
+
+    struct Box[T] { value: T }
+    impl Box[T] {
+        fn new(v: T) -> Box[T] {
+            return Box[T] { value: v };
+        }
+        fn get(self) -> T {
+            return self.value;
+        }
+    }
+
+    struct Pair[A, B] { first: A, second: B }
+    impl Pair[A, B] {
+        fn new(first: A, second: B) -> Pair[A, B] {
+            return Pair[A, B] { first: first, second: second };
+        }
+    }
+
+- Generic static calls infer args from context: `Box::new(5)`.
+
+### Enums
+
+    enum Color { Red, Green, Blue }
+    enum class Grade : i32 { C = 2, B = 3, A = 4 }
+
+    let g: i32 = Grade::A;   // 4
+
+- Plain enums: variants are implicit indices (0, 1, 2, ...).
+- `enum class Name : Type { ... }` gives explicit values.
+
+### Type aliases and constants
+
+    using Number = i32;
+    const ANSWER: Number = 42;
+
+### Pointers
+
+    let mut val: i32 = 42;
+    let ptr: *mut i32 = &mut val;
+    *ptr = 99;
+    let rp: *const i32 = &val;
+    printf("%d\n", *rp);          // 99
+
+    let np: *mut i32 = null;
+    if np == null { ... }
+
+### Casts (as)
+
+    let n: i32 = 3.9 as i32;          // 3
+    let c: char = (48 + 1) as char;   // '1'
+    let p: *mut i32 = malloc(64) as *mut i32;
+
+- Float -> int truncates.
+- Parentheses needed for deref-then-cast: `(*ptr) as i64`.
+
+### Calling C functions
+
     extern fn malloc(size: usize) -> *mut void;
     extern fn free(p: *mut void);
-    extern fn sin(x: f64) -> f64;
+    extern fn strlen(s: *const char) -> usize;
+    extern fn strcmp(a: *const char, b: *const char) -> i32;
+    extern fn printf(fmt: *const char, ...) -> i32;
 
-    fn main() {
-        let p: *mut i32 = malloc(64) as *mut i32;
-        ...
-        free(p);
-    }
+- Variadic extern functions use `...` for the parameter list.
+- The name is emitted verbatim (case-sensitive on Windows).
+- Bindings in `examples/std/ctypes.cp`: malloc, free, strlen, strcmp, memcpy,
+  memset, floor, sqrt, pow, modf, etc.
 
-Notes:
-- `void` is a valid type for extern parameters and returns (`*mut void` is a void pointer).
-- The name is emitted verbatim, so it must match the C symbol (case-sensitive on Windows).
-- The linker must be told where the symbol lives, see "Building and linking" below.
-- A convenient set of CRT bindings lives in examples/std/ctypes.cp
-  (malloc, free, strlen, memcpy, memset, modf, floor, sqrt, pow, ...).
+### Printing
 
-The null literal
-----------------
-`null` is a literal usable wherever a pointer type is expected:
+    println("hello");
+    println(42);
+    println(3.14);
+    println(true);
+
+    // format-checked {} printing
+    println("x is {} and y is {}", x, y);
+
+- `{}` placeholders must match the number of extra arguments exactly.
+- Each argument is mapped to a printf format: %d (i32), %lld (i64),
+  %u (u32), %f (f32/f64), %c (char), %s (*const char), %p (other ptr).
+
+### SizeOf
+
+    let s: usize = sizeOf[i32]() as usize;
+
+- Syntax: `sizeOf[Type]()`
+- Returns `usize` at compile time.
+
+### Null
+
+`null` is a literal valid for any pointer type:
 
     let p: *mut i32 = null;
-    if p == null {
-        ...
-    }
-    p = null;
+    if p == null { ... }
 
-Pointer comparison against null (and between pointers) is supported.
+Standard library
+----------------
 
-Casts
------
-`as` casts are supported between numeric types, from `char` to numbers,
-and from string literals / `*const char` to other pointer types:
+### vec.cp — Vec[T]
 
-    let n: i32 = (255.7 as i32);       // float -> int
-    let c: char = (48 + d) as char;    // int -> char (use the +48 for '0'..'9')
-    let ip: u64 = (3.14 as u64);       // float -> int
-    let s: *const char = "hello";      // literal coerces directly
+    let mut v: Vec[i32] = Vec::new();
+    v.push(10);
+    v.push(20);
+    println(v.len());     // 2
+    println(v.get(0));    // 10
+    v.set(1, 99);
+    let x: i32 = v.pop();
+    v.free_buf();
 
-The include directive
----------------------
-Files can be spliced into the source before compilation:
+Methods: new, with_capacity, len, capacity, is_empty, get, set, push, pop,
+insert, remove, last, reserve, grow, truncate, clear, free_buf.
 
-    include "std/raylib.cp";
-    include "std/ctypes.cp";
+### string.cp — String
 
-- The path is relative to the including file.
-- Imports are recursive and cycles are detected and rejected.
-- The `include` line is removed before lexing, so it can appear anywhere
-  at statement level.
+    let mut s: String = String::new();
+    s.push('H' as char);
+    s.append("ello");
+    println(s.cstr());          // "Hello"
+    println(s.len());           // 5
+    println(s.at(0) == 'H' as char);
 
-Language rules to know
-----------------------
-- `if` is a statement, not an expression: there is no `let x = if ...`.
-- There is no implicit return: a function returning a value must end with
-  an explicit `return expr;`. The final expression statement is NOT a return.
-- Every statement needs a trailing `;`, including the last one in a block.
-- Operator precedence follows C: `&` and `|` bind looser than `==` / `!=`.
-  Write `(mask & bit) != 0`, not `mask & bit != 0`.
-- `const NAME: ty = value;` requires the type annotation.
-- There are no arrays or array literals. Use `malloc` and pointer indexing:
-      let buf: *mut i32 = malloc((n * 4) as usize) as *mut i32;
-      buf[i] = 42;          // write
-      let v: i32 = buf[i];  // read
-- Pointer arithmetic (ptr + 1) is not supported; use buf[i] instead.
-- `Str` is not usable as a named type; return `*const char` instead.
+    let n: String = String::from_i64(2024);
+    println(n.cstr());          // "2024"
+    let parsed: i64 = n.parse_i64();
+    println(parsed);            // 2024
 
-Print output
-------------
-println("hello");
-println(42);
-println(3.14);
+Methods: new, with_capacity, from_cstr, len, capacity, is_empty, at, set,
+cstr, reserve, grow, push, append, equals_cstr, clear, free_buf, from_i64,
+from_i32, from_f64, parse_i64, index_of, contains, starts_with, ends_with,
+compare, substring, trimmed, to_upper, to_lower, take_buf, split.
 
-Main program example
---------------------
-import std.io;
+### map.cp — IntMap, StrIntMap
 
-struct Vector2 {
-    x: f64,
-    y: f64
-}
+    let mut m: IntMap = IntMap::new();
+    m.set(1, 10);
+    println(m.get(1));    // 10
+    m.free_buf();
 
-impl Vector2 {
-    fn new(x: f64, y: f64) -> Vector2 {
-        return Vector2 { x: x, y: y };
-    }
-}
+### hashmap.cp — HashMap, HashSet
 
-fn main() -> i32 {
-    let v: Vector2 = Vector2::new(1.5, 2.5);
-    println(v.x);
-    return 0;
-}
+    let mut h: HashMapStr[i64] = HashMapStr::new();
+    h.put("key", 42);
+    println(h.find("key").value);   // 42
+    println(h.contains("key"));     // 1
+    h.free_buf();
 
-How to use the compiler
------------------------
-From the project folder, you can run the compiler like this:
+    let mut s: HashSetStr = HashSetStr::new();
+    s.add("apple");
+    s.add("apple");    // deduplicated
+    println(s.len());  // 1
+    s.free_buf();
 
-    cargo run --quiet -- --lex your_file.cp
-    cargo run --quiet -- --parse your_file.cp
-    cargo run --quiet -- --check your_file.cp
+### ini.cp — INI parser
 
-With the codegen feature enabled, you can also emit LLVM IR and build executables:
+    let text = "[server]\nhost = 127.0.0.1\nport = 8080\n";
+    let cfg: Ini = Ini::parse(text);
+    printf("host: %s\n", cfg.get("server", "host"));
+    cfg.free_buf();
 
-    cargo run --quiet --features codegen -- --emit-llvm your_file.ll your_file.cp
-    cargo run --quiet --features codegen -- --link -o your_program.exe your_file.cp
+### sys.cp — System utilities
 
-Linking against external C libraries
-------------------------------------
-The `--link` step runs a C driver (clang) on the generated object file.
-Extra libraries are passed with `--link-lib` (repeatable) and extra search
-directories with `--lib-path` (repeatable):
+    let t: i64 = time_s();
+    let mut rng: Rng = Rng::new(t);
+    let roll: i64 = rng.range(1, 7);
+    let path: *const char = env_get("PATH");
+    sleep_ms(100);
+    let cmd: *const char = cmd_line();
+    let data: *mut char = read_file_all("input.txt");
+    free(data as *mut void);
+
+### io.cp — File I/O
+
+    let ok: bool = write_whole_file("out.txt", "hello", 5);
+    let mut data: *mut char = null;
+    let mut n: usize = 0;
+    read_whole_file("out.txt", &mut data, &mut n);
+    free(data as *mut void);
+
+### json.cp — JSON parser
+
+    let mut ok: bool = false;
+    let doc: JsonParser = json_parse("{\"x\":1}", &mut ok);
+    let root: i64 = doc.root();
+    let val: i64 = doc.get_key(root, "x");
+    printf("%lld\n", doc.as_number(val));   // 1
+    doc.free_buf();
+
+### ctypes.cp — C runtime bindings
+
+malloc, free, calloc, realloc, strlen, memcpy, memset, memcmp, atoi, atol,
+atof, strcmp, strcpy, toupper, tolower, abs, labs, fabs, floor, ceil, round,
+sqrt, pow, fmod, modf, rand, srand.
+
+GUI programming (raylib)
+------------------------
+raylib 5.5 bindings live in `examples/std/raylib.cp`. Link with:
 
     cargo run --quiet --features codegen -- --link \
         --link-lib raylibdll --lib-path ..\..\third_party\raylib \
         -o tetris.exe tetris.cp
 
-GUI programming with raylib
----------------------------
-raylib 5.5 bindings live in examples/std/raylib.cp and include:
-- Color / Vector2 / Rectangle structs and the full color palette (BLACK,
-  DARKGRAY, SKYBLUE, ...) as typed constants
-- window: InitWindow, WindowShouldClose, CloseWindow, SetTargetFPS
-- drawing: BeginDrawing, EndDrawing, ClearBackground, DrawRectangle,
-  DrawRectangleLines, DrawCircle, DrawText, DrawFPS
-- input: IsKeyPressed/IsKeyDown, GetKeyPressed, GetCharPressed,
-  IsMouseButtonPressed, GetMouseX/GetMouseY, GetMousePosition
-- timing/random: GetFrameTime, GetTime, GetRandomValue, SetRandomSeed
-- KEY_* and MOUSE_* button constants
+Copy `raylib.dll` next to the produced exe before running it.
 
-Windows build notes:
-- Use the DLL import library raylibdll.lib (the 5 MB raylib.lib in the MSVC
-  zip is the static library and pulls in extra system libs).
-- Copy raylib.dll next to the produced .exe before running it.
+Examples: `raylib_hello.cp`, `calculator_gui.cp`, `tetris.cp`.
 
-Working examples live in examples/:
-- examples/raylib_hello.cp        (minimal window)
-- examples/calculator_gui.cp      (working calculator with mouse + keyboard)
-- examples/tetris.cp              (full Tetris: rotation, gravity, scoring)
-- examples/ffi_test.cp            (extern fn and pointers)
+Layout
+------
+    src/           compiler: lexer, parser, AST, symbol table, typechecker, LLVM codegen
+    tests/         integration + example test suites
+    examples/      C-Prime programs, including the standard library
+    editor/vscode/ VS Code extension for syntax highlighting
 
-Notes
------
-- The compiler front end is implemented and works for the supported language features.
-- LLVM code generation is optional and only enabled with the codegen feature.
-- This guide reflects the features currently implemented by the compiler, not every
-  theoretical language feature you might want to add later.
-
-If you want a very small sample file, see examples/feature_demo.cp and
-examples/advanced_demo.cp in this repository.
+This guide reflects the language features currently implemented by the
+compiler. See also `C-Prime-Cheat-Sheet.txt` for a condensed reference.
